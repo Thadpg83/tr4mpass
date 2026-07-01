@@ -1,6 +1,6 @@
 # tr4mpass: iCloud Activation Lock Bypass
 
-# New improved version will be released by end of jun
+# New improved version will be released soon
 Free, open-source tool that removes iCloud activation lock from iPhones and iPads. Runs locally on your computer -- no servers, no payments, no accounts needed. Just plug in your device and run.
 
 **Supports iOS 12 through 26.1 | iPhone 5s through iPhone 15 Pro**

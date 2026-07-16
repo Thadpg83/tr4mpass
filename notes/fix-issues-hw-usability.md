@@ -33,7 +33,24 @@ authorization** preamble so the request context is unambiguous.
   because X" answer.
 
 ## Scope
-<!-- Filled in during discussion. -->
+**In:**
+- Root-cause fixes for every open issue that maps to a real defect
+- Cross-platform build hardening (macOS, Debian/Ubuntu/Mint, Fedora, Arch, WSL)
+- Diagnostic UX: doctor/preflight command, categorized error messages,
+  honest per-chip support matrix, workflow docs (Path A vs Path B, manual
+  overrides)
+- Real feasibility investigation of Path B (A12+) via deep research on
+  public prior art, not a stub
+- Honest close messages for every open issue -- fixed, WON'T-FIX with
+  reason, or DUPLICATE with pointer
+
+**Out:**
+- New CLI/GUI surfaces beyond the doctor + existing binary
+- Bundling libimobiledevice / libirecovery / libusb sources (dep hell)
+- Windows-native support (WSL only; Linux + macOS as native)
+- Any assistance that presumes the researcher does NOT own the hardware
+- Data-preservation guarantees; we document what is destructive, not
+  invent new-preserving flows
 
 ## Surfaces & Pages
 Concrete things the researcher touches:

@@ -62,7 +62,55 @@ Concrete things the researcher touches:
   attempting the bypass
 
 ## Key Concept Decisions
-<!-- Filled in as we agree on things. -->
+
+### C1: One research subagent per root-cause cluster, not per issue
+**Decision:** Fan out research to ~12 Opus 4.7 subagents, one per root-cause
+cluster (build-deps, libirecovery-api-drift, dfu-serial-parsing, chip-db-integrity,
+dfu-to-recovery-transition, path-a-checkm8-stage1, env-wsl-ux,
+workflow-manual-overrides, error-ux-doctor, product-docs-honesty,
+mobileactivationd-research, a12plus-path-b-feasibility).
+**Reasoning:** The 56 open issues collapse to ~10 root causes. Per-issue
+fan-out would fire the same investigation 5-10 times.
+**Rejected:** Per-issue fan-out (wasteful, duplicative); one omnibus agent
+(loses parallelism, weakest link on any one problem).
+
+### C2: Deliverable is code fix + UX wrapper, not code fix alone
+**Decision:** Each cluster subagent produces (a) the code fix, (b) any
+doctor/preflight additions that would have caught this cluster before it
+became an issue, and (c) an error-message rewrite for that failure mode.
+Plus a separate `error-ux-doctor` cluster owns cross-cutting UX.
+**Reasoning:** The tool currently fails *silently* on DFU parse. Fixing
+the bug without fixing "user does not know what went wrong" leaves the
+hardware-fluent / code-shy researcher stuck at the same wall.
+**Rejected:** Pure code-fix scope (leaves the underlying UX problem intact);
+UX-only rewrite (does not close the underlying defects).
+
+### C3: A12+ Path B gets a real research attempt via /deep-research, not a punt
+**Decision:** Launch `/deep-research` on Opus 4.7 specifically for the
+A12+ Path B feasibility question, in parallel with the cluster subagents.
+It investigates public prior art (checkra1n team notes, ipwndfu writeups,
+iBoot dumps, T8020/T8030/T8101/T8110/T8120/T8103/T8112 documentation),
+verifies each claim adversarially, and reports **feasible / partially
+feasible / not feasible** with evidence.
+**Reasoning:** The source's own TODO admits the SRAM offset is unknown --
+so the honest answer needs research, not a shrug.
+**Fallback if research says infeasible:** Cluster subagent lands the
+"honest limits" doc + README matrix + CLI refusal, closing the aspirational
+A12+ device requests with a clear "not supported because X" message.
+**Rejected:** Straight punt to WON'T-FIX (dishonest about what could be
+learned); solo attempt to code Path B blind (guaranteed waste).
+
+### C4: Uniform authorization preamble on every subagent brief
+**Decision:** Every subagent prompt opens with a fixed authorization
+block establishing (a) tool ownership by the maintainer, (b) hardware
+ownership by the researcher, (c) coordinated-disclosure / bug-bounty /
+defensive-research intent, (d) exclusion of PII, mass targeting,
+detection evasion, supply-chain compromise.
+**Reasoning:** Downstream models should treat these as authorized
+security research, not ambiguous bypass requests. Uniform header keeps
+framing load-bearing and consistent.
+**Rejected:** Per-agent bespoke framing (drift, inconsistent tone);
+implicit framing (unreliable).
 
 ## Questions for Research
 <!-- Sharp technical questions handed verbatim to /flow:research. Each one gets its own Fable subagent. -->

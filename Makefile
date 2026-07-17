@@ -86,7 +86,7 @@ CHIP_DB_CANARY_BIN = tests/chip_db_canary.bin
 	    tests/chip_db_canary.c -o $(CHIP_DB_CANARY_BIN)
 	@./$(CHIP_DB_CANARY_BIN)
 
-.PHONY: all clean test test-mocks .chip-db-canary
+.PHONY: all clean test test-mocks .chip-db-canary .build-flags
 
 # ------------------------------------------------------------------ #
 # Test target: compile only hardware-independent units                #

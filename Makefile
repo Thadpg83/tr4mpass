@@ -62,11 +62,7 @@ $(TARGET): .chip-db-canary $(OBJS)
 
 clean:
 	find src -name '*.o' -delete
-<<<<<<< HEAD
-	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET) .build-flags
-=======
-	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET) $(CHIP_DB_CANARY_BIN)
->>>>>>> agent/wf_f342a9f1-9c7-2
+	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET) .build-flags $(CHIP_DB_CANARY_BIN)
 	find tests -name '*.o' -delete 2>/dev/null || true
 
 # ------------------------------------------------------------------ #

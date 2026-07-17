@@ -48,6 +48,18 @@ typedef struct {
 
     /* USB handle for DFU mode (NULL when not in DFU) */
     libusb_device_handle *usb;
+
+    /*
+     * DFU serial-string descriptor index reported by the device
+     * (bDeviceDescriptor.iSerialNumber).  Populated by usb_dfu_find()
+     * when the device is enumerated.  Pre-A9 devices report 3; A14+
+     * devices report 4 (product string moved to index 3).  A value of
+     * 0 means the device did not advertise a serial descriptor and
+     * callers must fall back to the legacy probe order (3, then 4).
+     * Kept at end of struct so appending it is a source-compatible ABI
+     * addition.
+     */
+    uint8_t iserial_index;
 } device_info_t;
 
 /*

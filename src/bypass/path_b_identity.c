@@ -21,9 +21,6 @@
 #define USB_REQ_GET_DESCRIPTOR  0x06
 #define USB_DT_STRING           0x03
 
-/* Serial string descriptor index for Apple DFU devices */
-#define DFU_SERIAL_DESC_INDEX   3
-
 /* PWND marker appended to the serial string */
 #define PWND_MARKER             " PWND:[checkm8]"
 
@@ -119,19 +116,82 @@ int path_b_read_serial(device_info_t *dev, char *buf, size_t len)
     }
 
     if (dev->usb) {
-        /* DFU mode: USB GET_DESCRIPTOR */
-        uint8_t desc[USB_DESC_MAX_LEN];
-        int desc_len = usb_get_string_descriptor(dev->usb, DFU_SERIAL_DESC_INDEX,
-                                                 desc, sizeof(desc));
-        if (desc_len < 0)
-            return -1;
+        /*
+         * DFU mode: USB GET_DESCRIPTOR.  Use the runtime-resolved
+         * bDeviceDescriptor.iSerialNumber captured by usb_dfu_find(),
+         * falling back to the legacy indices (3 then 4) if the device
+         * did not advertise one or the primary read fails.  Any probe
+         * that succeeds decodes cleanly to ASCII wins; the first one
+         * whose decoded text does not start with the product-string
+         * sentinel is accepted.
+         */
+        static const uint8_t k_legacy_a = 3;
+        static const uint8_t k_legacy_b = 4;
+        uint8_t probes[3];
+        size_t probe_count = 0;
+        size_t i, j;
+        int last_len = -1;
+        char last_ascii[USB_DESC_MAX_LEN] = {0};
 
-        if (utf16le_to_ascii(desc, desc_len, buf, len) < 0) {
-            log_error("[path_b_id] Failed to decode serial descriptor");
-            return -1;
+        if (dev->iserial_index != 0)
+            probes[probe_count++] = dev->iserial_index;
+        if (k_legacy_a != dev->iserial_index)
+            probes[probe_count++] = k_legacy_a;
+        if (k_legacy_b != dev->iserial_index && k_legacy_b != k_legacy_a)
+            probes[probe_count++] = k_legacy_b;
+
+        for (i = 0; i < probe_count; i++) {
+            uint8_t idx = probes[i];
+            int already = 0;
+            uint8_t desc[USB_DESC_MAX_LEN];
+            char decoded[USB_DESC_MAX_LEN];
+            int desc_len;
+
+            for (j = 0; j < i; j++) {
+                if (probes[j] == idx) { already = 1; break; }
+            }
+            if (already)
+                continue;
+
+            desc_len = usb_get_string_descriptor(dev->usb, idx,
+                                                 desc, sizeof(desc));
+            if (desc_len < 0) {
+                log_debug("[path_b_id] GET_DESCRIPTOR idx %u failed, trying next",
+                          (unsigned)idx);
+                continue;
+            }
+
+            if (utf16le_to_ascii(desc, desc_len, decoded, sizeof(decoded)) < 0) {
+                log_debug("[path_b_id] decode failed at idx %u", (unsigned)idx);
+                continue;
+            }
+
+            /* Remember the most recent successful decode; if every
+             * probe returns the product string we still surface it. */
+            snprintf(last_ascii, sizeof(last_ascii), "%s", decoded);
+            last_len = (int)strlen(last_ascii);
+
+            if (strncmp(decoded, "Apple Mobile Device", 19) == 0) {
+                log_debug("[path_b_id] idx %u returned product string, probing further",
+                          (unsigned)idx);
+                continue;
+            }
+
+            snprintf(buf, len, "%s", decoded);
+            log_debug("[path_b_id] Read serial (DFU, idx %u): %s",
+                      (unsigned)idx, buf);
+            return 0;
         }
-        log_debug("[path_b_id] Read serial (DFU): %s", buf);
-        return 0;
+
+        if (last_len > 0) {
+            snprintf(buf, len, "%s", last_ascii);
+            log_warn("[path_b_id] All probes returned product string; using \"%s\"",
+                     buf);
+            return 0;
+        }
+
+        log_error("[path_b_id] Failed to read serial descriptor at any probed index");
+        return -1;
     }
 
     /* Recovery mode: use libirecovery */

@@ -84,17 +84,20 @@ int checkm8_stage_patch(exploit_ctx_t *ctx)  { (void)ctx; return 0; }
 int usb_dfu_init(void)    { return 0; }
 void usb_dfu_cleanup(void) {}
 
-int usb_dfu_find(libusb_device_handle **handle)
+int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out)
 {
     if (handle) *handle = NULL;
+    if (iserial_out) *iserial_out = 3;
     mock_log_append("usb_dfu_find");
     return 0;
 }
 
-int usb_dfu_read_info(libusb_device_handle *handle, uint32_t *cpid,
-                      uint64_t *ecid, char *serial, size_t serial_len)
+int usb_dfu_read_info(libusb_device_handle *handle, uint8_t iserial_hint,
+                      uint32_t *cpid, uint64_t *ecid,
+                      char *serial, size_t serial_len)
 {
     (void)handle;
+    (void)iserial_hint;
     if (cpid)   *cpid = 0x8015;
     if (ecid)   *ecid = 0x001A2B3C4D5E6F70ULL;
     if (serial && serial_len > 0)

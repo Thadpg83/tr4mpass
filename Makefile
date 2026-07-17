@@ -173,8 +173,3 @@ test-mocks: $(MOCK_TARGET)
 
 $(MOCK_TARGET): $(MOCK_ALL_SRCS)
 	$(CC) $(MOCK_CFLAGS) -o $@ $^ $(MOCK_LDFLAGS)
-<<<<<<< HEAD
-
-.PHONY: all clean test test-mocks .build-flags
-=======
->>>>>>> agent/wf_f342a9f1-9c7-2

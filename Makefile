@@ -18,16 +18,39 @@ TARGET   = tr4mpass
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+$(TARGET): .chip-db-canary $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -Iinclude -c -o $@ $<
 
 clean:
 	find src -name '*.o' -delete
-	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET)
+	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET) $(CHIP_DB_CANARY_BIN)
 	find tests -name '*.o' -delete 2>/dev/null || true
+
+# ------------------------------------------------------------------ #
+# Chip DB integrity canary (T5, issue #53).                          #
+#                                                                    #
+# Rebuilt and re-run on every $(TARGET) build. If any well-known     #
+# row in include/device/chip_db_table*.h diverges from tests/        #
+# chip_db_canary.c's expected (name, marketing, checkm8) tuple, the  #
+# probe exits non-zero and the whole build fails -- guarding against #
+# a repeat of the 0x8947/0x8960 mislabel bug where the CLI announced #
+# the wrong device family. Bypass with STRICT_CHIP_DB=0 only when a  #
+# distro-packaged chip table has legitimately diverged.              #
+# ------------------------------------------------------------------ #
+STRICT_CHIP_DB    ?= 1
+CHIP_DB_CANARY_BIN = tests/chip_db_canary.bin
+
+.chip-db-canary: tests/chip_db_canary.c include/device/chip_db_table.h \
+                 include/device/chip_db_table_rop.h include/device/chip_db.h
+	@$(CC) -Wall -Wextra -std=c99 -D_GNU_SOURCE -O2 -Iinclude \
+	    -DSTRICT_CHIP_DB=$(STRICT_CHIP_DB) \
+	    tests/chip_db_canary.c -o $(CHIP_DB_CANARY_BIN)
+	@./$(CHIP_DB_CANARY_BIN)
+
+.PHONY: all clean test test-mocks .chip-db-canary
 
 # ------------------------------------------------------------------ #
 # Test target: compile only hardware-independent units                #
@@ -99,5 +122,3 @@ test-mocks: $(MOCK_TARGET)
 
 $(MOCK_TARGET): $(MOCK_ALL_SRCS)
 	$(CC) $(MOCK_CFLAGS) -o $@ $^ $(MOCK_LDFLAGS)
-
-.PHONY: all clean test test-mocks

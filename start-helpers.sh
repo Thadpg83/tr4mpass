@@ -75,8 +75,12 @@ detect_linux_pm() {
         LINUX_PM="dnf"
     elif command -v pacman >/dev/null 2>&1; then
         LINUX_PM="pacman"
+    elif command -v zypper >/dev/null 2>&1; then
+        LINUX_PM="zypper"
+    elif command -v apk >/dev/null 2>&1; then
+        LINUX_PM="apk"
     else
-        msg_err "No supported package manager found (need apt, dnf, or pacman)."
+        msg_err "No supported package manager found (need apt, dnf, pacman, zypper, or apk)."
         exit 1
     fi
 }
@@ -101,14 +105,32 @@ install_deps_macos() {
         exit 1
     fi
 
-    local brew_pkgs="libimobiledevice libirecovery libusb libplist openssl pkg-config libssh2"
+    local brew_pkgs="libimobiledevice libirecovery libusb libplist openssl curl pkg-config libssh2"
     msg_info "Installing dependencies via Homebrew..."
     brew install $brew_pkgs
     msg_ok "Homebrew dependencies installed."
 }
 
+# openssl and curl are keg-only under Homebrew; their .pc files never
+# land on the default pkg-config search path. Prepend the two prefixes
+# so pkg-config can find libcrypto and libcurl without editing the
+# Makefile.
+macos_prep_pkgconfig() {
+    if ! command -v brew >/dev/null 2>&1; then
+        return 0
+    fi
+    local ossl_prefix curl_prefix extra=""
+    ossl_prefix="$(brew --prefix openssl 2>/dev/null || true)"
+    curl_prefix="$(brew --prefix curl 2>/dev/null || true)"
+    [ -n "$ossl_prefix" ] && extra="${ossl_prefix}/lib/pkgconfig"
+    [ -n "$curl_prefix" ] && extra="${extra:+${extra}:}${curl_prefix}/lib/pkgconfig"
+    if [ -n "$extra" ]; then
+        export PKG_CONFIG_PATH="${extra}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+    fi
+}
+
 install_deps_linux_apt() {
-    local apt_pkgs="libimobiledevice-dev libirecovery-1.0-dev libusb-1.0-0-dev libplist-dev libssl-dev libssh2-1-dev pkg-config build-essential"
+    local apt_pkgs="libimobiledevice-dev libirecovery-1.0-dev libusb-1.0-0-dev libplist-dev libssl-dev libcurl4-openssl-dev libssh2-1-dev pkg-config build-essential"
     msg_info "Installing dependencies via apt..."
     sudo apt-get update -qq
     sudo apt-get install -y $apt_pkgs
@@ -116,13 +138,38 @@ install_deps_linux_apt() {
 }
 
 install_deps_linux_dnf() {
-    local dnf_pkgs="libimobiledevice-devel libirecovery-devel libusb1-devel libplist-devel openssl-devel libssh2-devel pkg-config gcc make"
+    local dnf_pkgs="libimobiledevice-devel libirecovery-devel libusb1-devel libplist-devel openssl-devel libcurl-devel libssh2-devel pkg-config gcc make"
     msg_info "Installing dependencies via dnf..."
     sudo dnf install -y $dnf_pkgs
     msg_ok "DNF dependencies installed."
 }
 
+install_deps_linux_pacman() {
+    local pacman_pkgs="libimobiledevice libirecovery libusb libplist openssl libssh2 curl pkgconf base-devel"
+    msg_info "Installing dependencies via pacman..."
+    sudo pacman -S --needed --noconfirm $pacman_pkgs
+    msg_ok "pacman dependencies installed."
+}
+
+install_deps_linux_zypper() {
+    local zypper_pkgs="libimobiledevice-devel libirecovery-devel libusb-1_0-devel libplist-2_0-devel openssl-devel libssh2-devel libcurl-devel pkg-config gcc make"
+    msg_info "Installing dependencies via zypper..."
+    sudo zypper install -y $zypper_pkgs
+    msg_ok "zypper dependencies installed."
+}
+
+install_deps_linux_apk() {
+    local apk_pkgs="libimobiledevice-dev libirecovery-dev libusb-dev libplist-dev openssl-dev libssh2-dev curl-dev pkgconfig gcc make musl-dev"
+    msg_info "Installing dependencies via apk..."
+    sudo apk add --no-cache $apk_pkgs
+    msg_ok "apk dependencies installed."
+}
+
 install_deps() {
+    if [ "$DETECTED_OS" = "macos" ]; then
+        macos_prep_pkgconfig
+    fi
+
     if ! command -v pkg-config >/dev/null 2>&1; then
         msg_warn "pkg-config not found, installing it first..."
         case "$DETECTED_OS" in
@@ -130,9 +177,11 @@ install_deps() {
             linux|wsl)
                 detect_linux_pm
                 case "$LINUX_PM" in
-                    apt) sudo apt-get update -qq && sudo apt-get install -y pkg-config ;;
-                    dnf) sudo dnf install -y pkg-config ;;
-                    pacman) sudo pacman -S --noconfirm pkg-config ;;
+                    apt)    sudo apt-get update -qq && sudo apt-get install -y pkg-config ;;
+                    dnf)    sudo dnf install -y pkg-config ;;
+                    pacman) sudo pacman -S --needed --noconfirm pkgconf ;;
+                    zypper) sudo zypper install -y pkg-config ;;
+                    apk)    sudo apk add --no-cache pkgconfig ;;
                 esac
                 ;;
         esac
@@ -148,19 +197,18 @@ install_deps() {
     msg_warn "Missing dependencies: ${MISSING_DEPS[*]}"
 
     case "$DETECTED_OS" in
-        macos) install_deps_macos ;;
+        macos)
+            install_deps_macos
+            macos_prep_pkgconfig
+            ;;
         linux|wsl)
             detect_linux_pm
             case "$LINUX_PM" in
-                apt) install_deps_linux_apt ;;
-                dnf) install_deps_linux_dnf ;;
-                pacman)
-                    msg_warn "Arch Linux detected. Install from AUR:"
-                    msg_info "  yay -S libimobiledevice libirecovery libusb libplist openssl libssh2 pkg-config base-devel"
-                    msg_info "  or: paru -S libimobiledevice-git libirecovery-git libssh2"
-                    msg_info "Re-run this script after installing."
-                    exit 1
-                    ;;
+                apt)    install_deps_linux_apt ;;
+                dnf)    install_deps_linux_dnf ;;
+                pacman) install_deps_linux_pacman ;;
+                zypper) install_deps_linux_zypper ;;
+                apk)    install_deps_linux_apk ;;
             esac
             ;;
     esac
@@ -170,7 +218,8 @@ install_deps() {
         msg_err "Still missing after install: ${MISSING_DEPS[*]}"
         msg_info "Please install them manually and re-run this script."
         msg_info "  libssh2 is required for Phase 2C SSH jailbreak delivery."
-        msg_info "  If libssh2 was just installed, re-running should pick it up."
+        msg_info "  libcurl is required for Albert activation server calls."
+        msg_info "  If either was just installed, re-running should pick it up."
         exit 1
     fi
 

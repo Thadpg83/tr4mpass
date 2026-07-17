@@ -114,6 +114,18 @@ const struct irecv_device_info *irecv_get_device_info(irecv_client_t client)
     return &client->info;
 }
 
+irecv_error_t irecv_get_mode(irecv_client_t client, int *mode)
+{
+    mock_log_append("irecv_get_mode");
+    if (!client || !mode)
+        return (irecv_error_t)-1;
+    /* Reflect the configured USB product ID: recovery PIDs live in
+     * 0x1280..0x1283, DFU is 0x1227. Callers compare against
+     * IRECV_K_RECOVERY_MODE_[1..4] which are the recovery PIDs. */
+    *mode = (int)g_irecv_info_pid;
+    return IRECV_E_SUCCESS;
+}
+
 irecv_error_t irecv_send_command(irecv_client_t client, const char *command)
 {
     (void)client;

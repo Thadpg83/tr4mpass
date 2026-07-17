@@ -11,7 +11,7 @@
 #define RECORD_H
 
 #include <stdint.h>
-#include <plist/plist.h>
+#include "compat/plist_compat.h"
 #include <libimobiledevice/lockdown.h>
 #include "device/device.h"
 

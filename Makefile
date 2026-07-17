@@ -11,12 +11,41 @@ LDFLAGS += $(shell pkg-config --libs   $(PKG_LIBS) 2>/dev/null)
 
 $(foreach lib,$(PKG_LIBS),$(if $(shell pkg-config --exists $(lib) 2>/dev/null && echo ok),,$(warning Library $(lib) not found by pkg-config)))
 
+# ------------------------------------------------------------------ #
+# Feature probes for optional library symbols.                       #
+#                                                                    #
+# libplist 2.3 added plist_mem_free() and a 4-arg plist_from_memory. #
+# Older libirecovery lacked IRECV_SEND_OPT_DFU_NOTIFY_FINISH.        #
+# We probe by compiling a canary; on success we emit -D flags so the #
+# include/compat/*.h shims pick the right branch. Results are also   #
+# written to .build-flags for `tr4mpass doctor` (task 005) to        #
+# surface at runtime.                                                #
+# ------------------------------------------------------------------ #
+
+PROBE_CFLAGS := $(shell pkg-config --cflags libplist-2.0 libirecovery-1.0 2>/dev/null)
+
+# `#` is a make comment even inside $(shell ...), so emit the `#include`
+# via printf's octal escape (\043).
+HAVE_PLIST_MEM_FREE  := $(shell printf '\043include <plist/plist.h>\nint main(void){plist_mem_free((void*)0);return 0;}\n' | $(CC) $(PROBE_CFLAGS) -x c -c - -o /dev/null 2>/dev/null && echo 1 || echo 0)
+HAVE_PLIST_FROM_MEM4 := $(shell printf '\043include <plist/plist.h>\nint main(void){plist_t p=0; plist_from_memory("",0,&p,(plist_format_t*)0);return 0;}\n' | $(CC) $(PROBE_CFLAGS) -x c -c - -o /dev/null 2>/dev/null && echo 1 || echo 0)
+HAVE_IRECV_NOTIFY    := $(shell printf '\043include <libirecovery.h>\nint main(void){return (int)IRECV_SEND_OPT_DFU_NOTIFY_FINISH;}\n' | $(CC) $(PROBE_CFLAGS) -x c -c - -o /dev/null 2>/dev/null && echo 1 || echo 0)
+
+ifeq ($(HAVE_PLIST_MEM_FREE),1)
+    CFLAGS += -DTP_PLIST_HAS_MEM_FREE=1
+endif
+ifeq ($(HAVE_PLIST_FROM_MEM4),1)
+    CFLAGS += -DTP_PLIST_HAS_FMT_ARG=1
+endif
+ifeq ($(HAVE_IRECV_NOTIFY),1)
+    CFLAGS += -DTP_IRECV_HAS_NOTIFY_FINISH=1
+endif
+
 # Auto-discover all C sources under src/
 SRCS     = $(shell find src -name '*.c')
 OBJS     = $(SRCS:.c=.o)
 TARGET   = tr4mpass
 
-all: $(TARGET)
+all: .build-flags $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -24,9 +53,16 @@ $(TARGET): $(OBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -Iinclude -c -o $@ $<
 
+# .build-flags is a diagnostic file consumed by `tr4mpass doctor`.
+# It records which optional symbols the probes detected on this host.
+.build-flags:
+	@printf 'HAVE_PLIST_MEM_FREE=%s\n'      '$(HAVE_PLIST_MEM_FREE)'  >  $@
+	@printf 'HAVE_PLIST_FROM_MEM4=%s\n'     '$(HAVE_PLIST_FROM_MEM4)' >> $@
+	@printf 'HAVE_IRECV_NOTIFY_FINISH=%s\n' '$(HAVE_IRECV_NOTIFY)'    >> $@
+
 clean:
 	find src -name '*.o' -delete
-	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET)
+	rm -f $(TARGET) $(TEST_TARGET) $(MOCK_TARGET) .build-flags
 	find tests -name '*.o' -delete 2>/dev/null || true
 
 # ------------------------------------------------------------------ #
@@ -88,10 +124,25 @@ MOCK_TARGET   = tests/run_mock_tests
 
 # Only link libs that the SUT still needs at runtime and we did NOT mock.
 MOCK_PKG_LIBS = libplist-2.0 openssl
+# Headers-only pkg-config libs: symbols are mocked so we do NOT link them,
+# but SUT sources still #include their public headers, so we need the
+# include paths at compile time. libusb-1.0 lives under
+# <prefix>/include/libusb-1.0/ on every distro; without the -I flag the
+# `#include <libusb.h>` in include/device/device.h cannot be resolved.
+MOCK_HEADER_LIBS = libusb-1.0 libimobiledevice-1.0 libirecovery-1.0 libssh2 libcurl
 MOCK_CFLAGS   = -Wall -Wextra -std=c99 -D_GNU_SOURCE -O2 \
-                $(shell pkg-config --cflags $(MOCK_PKG_LIBS) 2>/dev/null) \
+                $(shell pkg-config --cflags $(MOCK_PKG_LIBS) $(MOCK_HEADER_LIBS) 2>/dev/null) \
                 -Iinclude -Itests -Itests/integration -Itests/mocks \
                 -DTEST_MODE -DUNIT_TEST
+ifeq ($(HAVE_PLIST_MEM_FREE),1)
+    MOCK_CFLAGS += -DTP_PLIST_HAS_MEM_FREE=1
+endif
+ifeq ($(HAVE_PLIST_FROM_MEM4),1)
+    MOCK_CFLAGS += -DTP_PLIST_HAS_FMT_ARG=1
+endif
+ifeq ($(HAVE_IRECV_NOTIFY),1)
+    MOCK_CFLAGS += -DTP_IRECV_HAS_NOTIFY_FINISH=1
+endif
 MOCK_LDFLAGS  = $(shell pkg-config --libs $(MOCK_PKG_LIBS) 2>/dev/null)
 
 test-mocks: $(MOCK_TARGET)
@@ -100,4 +151,4 @@ test-mocks: $(MOCK_TARGET)
 $(MOCK_TARGET): $(MOCK_ALL_SRCS)
 	$(CC) $(MOCK_CFLAGS) -o $@ $^ $(MOCK_LDFLAGS)
 
-.PHONY: all clean test test-mocks
+.PHONY: all clean test test-mocks .build-flags

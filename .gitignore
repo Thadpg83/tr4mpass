@@ -10,7 +10,11 @@ itr4m
 tr4mpass
 tests/run_tests
 tests/run_mock_tests
+<<<<<<< HEAD
 .build-flags
+=======
+tests/chip_db_canary.bin
+>>>>>>> agent/wf_f342a9f1-9c7-2
 
 # OS files
 .DS_Store

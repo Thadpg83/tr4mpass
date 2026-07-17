@@ -2,7 +2,9 @@
  * chip_db_table_rop.h -- chip table part 2: ROP-capable chips + A12+ stubs.
  *
  * Included by chip_db_table.h inside the g_chip_table[] array.
- * Do not include this file directly. All values from gaster.
+ * Do not include this file directly. All offsets from gaster.c
+ * (github.com/0x7ff/gaster). Each row carries a "gaster.c:NNN" marker
+ * pointing at the SRTG string check that owns those offsets.
  */
 #ifndef CHIP_DB_TABLE_ROP_H
 #define CHIP_DB_TABLE_ROP_H
@@ -11,8 +13,8 @@
     /* ARM64 chips with ROP gadgets (A9X, A10, A10X, A11, T2)          */
     /* ================================================================ */
 
-    /* CPID 0x8001 -- A9X, iPad Pro (1st gen) */
-    /* gaster: iBoot-2481.0.0.2.1 */
+    /* CPID 0x8001 -- S8001 = A9X (APL1021), iPad Pro (1st gen).
+     * SRTG:[iBoot-2481.0.0.2.1]. gaster.c:658 */
     {
         .cpid = 0x8001,
         .name = "A9X",
@@ -42,12 +44,13 @@
         .ttbr0_sram_off       = 0x600,
     },
 
-    /* CPID 0x8010 -- A10 Fusion (ROP path) */
-    /* gaster: iBoot-2696.0.0.1.33 */
+    /* CPID 0x8010 -- T8010 = A10 Fusion (APL1W24), iPhone 7 / iPhone 7
+     * Plus / iPod touch 7 / iPad (6th gen) / iPad (7th gen).
+     * SRTG:[iBoot-2696.0.0.1.33]. gaster.c:712 */
     {
         .cpid = 0x8010,
-        .name = "A10 (iBoot-2696)",
-        .marketing = "iPhone 7 / iPod touch 7G",
+        .name = "A10",
+        .marketing = "iPhone 7/7+ / iPod touch 7 / iPad 6 / iPad 7",
         .checkm8_vulnerable = 1,
         .config_overwrite_pad = 0x5C0,
         .config_hole          = 5,
@@ -73,12 +76,13 @@
         .ttbr0_sram_off       = 0x600,
     },
 
-    /* CPID 0x8011 -- A10X Fusion, iPad Pro 10.5 / Apple TV 4K */
-    /* gaster: iBoot-3135.0.0.2.3 */
+    /* CPID 0x8011 -- T8011 = A10X Fusion (APL1071), iPad Pro 10.5" /
+     * iPad Pro 12.9" (2nd gen) / Apple TV 4K (1st gen).
+     * SRTG:[iBoot-3135.0.0.2.3]. gaster.c:736 */
     {
         .cpid = 0x8011,
         .name = "A10X",
-        .marketing = "iPad Pro 10.5\" / Apple TV 4K",
+        .marketing = "iPad Pro 10.5\" / iPad Pro 12.9\" (2nd gen) / Apple TV 4K",
         .checkm8_vulnerable = 1,
         .config_overwrite_pad = 0x540,
         .config_hole          = 6,
@@ -104,8 +108,9 @@
         .ttbr0_sram_off       = 0x600,
     },
 
-    /* CPID 0x8015 -- A11 Bionic, iPhone 8/X */
-    /* gaster: iBoot-3332.0.0.1.23 */
+    /* CPID 0x8015 -- T8015 = A11 Bionic (APL1W72), iPhone 8 /
+     * iPhone 8 Plus / iPhone X.
+     * SRTG:[iBoot-3332.0.0.1.23]. gaster.c:760 */
     {
         .cpid = 0x8015,
         .name = "A11",
@@ -135,8 +140,9 @@
         .ttbr0_sram_off       = 0x600,
     },
 
-    /* CPID 0x8012 -- T2 Security Chip */
-    /* gaster: iBoot-3401.0.0.1.16 */
+    /* CPID 0x8012 -- T8012 = T2 Security Chip (APL1027), Mac T2 SoC
+     * (iBridge2, based on A10 Fusion).
+     * SRTG:[iBoot-3401.0.0.1.16]. gaster.c:784 */
     {
         .cpid = 0x8012,
         .name = "T2",
@@ -168,6 +174,9 @@
 
     /* ================================================================ */
     /* A12 and later: NOT checkm8-vulnerable. All offsets zeroed.        */
+    /* Marketing/name entries only exist so runtime identification and   */
+    /* --print-chip-db can honestly report "unsupported chip" rather     */
+    /* than "unknown CPID". Not present in gaster (out of scope: T12).   */
     /* ================================================================ */
 
     { .cpid = 0x8020, .name = "A12",  .marketing = "iPhone XS / iPhone XR"             },

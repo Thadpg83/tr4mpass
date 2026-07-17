@@ -33,7 +33,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <libirecovery.h>
+#include "compat/libirecovery_compat.h"
 
 #include "bypass/path_a_internal.h"
 #include "bypass/path_a_ramdisk_internal.h"
@@ -146,6 +146,14 @@ send_staged_image(irecv_client_t client, const char *path,
                   label, irecv_strerror(err));
         return -1;
     }
+#if TP_IRECV_NEEDS_MANUAL_ZLP
+    /* Older libirecovery cannot request the DFU notify-finish ZLP via
+     * the send flag, so emit one by hand to mark end-of-transfer. */
+    {
+        unsigned char zlp = 0;
+        (void)irecv_send_buffer(client, &zlp, 0, 0);
+    }
+#endif
     return 0;
 }
 

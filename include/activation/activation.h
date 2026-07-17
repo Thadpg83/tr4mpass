@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <plist/plist.h>
+#include "compat/plist_compat.h"
 #include <libimobiledevice/libimobiledevice.h>
 #include <libimobiledevice/mobileactivation.h>
 #include "device/device.h"

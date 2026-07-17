@@ -2,7 +2,7 @@
 #define PLIST_HELPERS_H
 
 #include <stdint.h>
-#include <plist/plist.h>
+#include "compat/plist_compat.h"
 
 /*
  * Retrieve a string value from a plist dict by key.

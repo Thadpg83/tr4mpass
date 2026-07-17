@@ -130,20 +130,23 @@ static int parse_args(int argc, char *argv[], cli_opts_t *opts)
 static int detect_device(device_info_t *dev)
 {
     libusb_device_handle *usb_handle = NULL;
+    uint8_t iserial = 0;
     memset(dev, 0, sizeof(*dev));
 
-    if (usb_dfu_find(&usb_handle) == 0) {
-        log_info("Device found in DFU mode");
+    if (usb_dfu_find(&usb_handle, &iserial) == 0) {
+        log_info("Device found in DFU mode (iSerial index: %u)",
+                 (unsigned)iserial);
         uint32_t cpid = 0;
         uint64_t ecid = 0;
         char serial[DFU_SERIAL_MAX] = {0};
-        if (usb_dfu_read_info(usb_handle, &cpid, &ecid,
+        if (usb_dfu_read_info(usb_handle, iserial, &cpid, &ecid,
                               serial, sizeof(serial)) < 0)
             log_warn("Failed to read DFU serial info");
-        dev->cpid        = cpid;
-        dev->ecid        = ecid;
-        dev->is_dfu_mode = 1;
-        dev->usb         = usb_handle;
+        dev->cpid          = cpid;
+        dev->ecid          = ecid;
+        dev->is_dfu_mode   = 1;
+        dev->usb           = usb_handle;
+        dev->iserial_index = iserial;
         snprintf(dev->serial, sizeof(dev->serial), "%s", serial);
         return 0;
     }
@@ -259,11 +262,22 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Apply CLI overrides for CPID/ECID */
+    /*
+     * Apply CLI overrides for CPID/ECID.  This runs after
+     * usb_dfu_read_info() has probed every descriptor index it knows;
+     * gating on `dev.<field> == 0` means overrides only fire when the
+     * device did not surface the value itself (either the descriptor
+     * layout is undocumented or the device is not in true SecureROM
+     * DFU).  If either override applied, emit a single "manual
+     * override" line so bug reports show the fallback ran.
+     */
+    int cpid_from_override = 0;
+    int ecid_from_override = 0;
     if (opts.has_cpid_override) {
         if (dev.cpid == 0) {
             dev.cpid = opts.cpid_override;
             log_info("CPID overridden: 0x%04X (from --cpid)", dev.cpid);
+            cpid_from_override = 1;
         } else {
             log_info("CPID already detected (0x%04X), ignoring --cpid override",
                      dev.cpid);
@@ -274,11 +288,15 @@ int main(int argc, char *argv[])
             dev.ecid = opts.ecid_override;
             log_info("ECID overridden: 0x%llX (from --ecid)",
                      (unsigned long long)dev.ecid);
+            ecid_from_override = 1;
         } else {
             log_info("ECID already detected (0x%llX), ignoring --ecid override",
                      (unsigned long long)dev.ecid);
         }
     }
+    if (cpid_from_override || ecid_from_override)
+        log_info("[device] using --cpid=0x%04X --ecid=0x%llX manual override",
+                 dev.cpid, (unsigned long long)dev.ecid);
 
     enrich_chip_info(&dev);
     device_print_info(&dev);

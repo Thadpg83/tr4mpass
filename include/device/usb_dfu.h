@@ -36,20 +36,35 @@ void usb_dfu_cleanup(void);
 
 /*
  * Find an Apple device in DFU mode (VID=0x05AC, PID=0x1227).
- * On success, *handle is set to an opened device handle and 0 is returned.
- * On failure, *handle is set to NULL and -1 is returned.
+ * On success, *handle is set to an opened device handle and 0 is
+ * returned.  On failure, *handle is set to NULL and -1 is returned.
+ *
+ * If iserial_out is non-NULL, the device's bDeviceDescriptor.iSerialNumber
+ * (the actual USB string index that carries CPID/ECID) is written to it.
+ * A value of 0 means the descriptor did not advertise a serial index --
+ * usb_dfu_read_info() will fall back through the legacy probe order.
  */
-int usb_dfu_find(libusb_device_handle **handle);
+int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out);
 
 /*
  * Read device info from the DFU serial string descriptor.
  * Parses CPID and ECID as hex values from the key:value pairs.
  * Copies the full serial string to serial (up to serial_len bytes).
  * Missing fields are set to 0 / empty string.
+ *
+ * iserial_hint is the index reported by bDeviceDescriptor.iSerialNumber
+ * (usually populated by usb_dfu_find).  Pass 0 when the caller has no
+ * hint; the function will still try the legacy indices 3 and 4.
+ * The read attempts, in order: (a) iserial_hint if non-zero,
+ * (b) 3 (pre-A9 default), (c) 4 (A14+ default).  Duplicate indices are
+ * skipped.  The "device is not in SecureROM DFU" sentinel is only
+ * raised when every probe returned the product string.
+ *
  * Returns 0 on success, -1 on failure.
  */
-int usb_dfu_read_info(libusb_device_handle *handle, uint32_t *cpid,
-                      uint64_t *ecid, char *serial, size_t serial_len);
+int usb_dfu_read_info(libusb_device_handle *handle, uint8_t iserial_hint,
+                      uint32_t *cpid, uint64_t *ecid,
+                      char *serial, size_t serial_len);
 
 /*
  * Send data to the DFU device via control transfer (DFU_DNLOAD).

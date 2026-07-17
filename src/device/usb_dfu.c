@@ -19,8 +19,11 @@
 /* Maximum chunk size for a single DFU transfer */
 #define DFU_MAX_TRANSFER 0x800
 
-/* Serial string descriptor index for Apple DFU devices */
-#define DFU_SERIAL_INDEX 3
+/* Legacy fallback string indices tried when the device does not
+ * advertise a serial descriptor via bDeviceDescriptor.iSerialNumber.
+ * Pre-A9 iBoot exposes CPID/ECID at index 3; A14+ moves it to 4. */
+#define DFU_SERIAL_LEGACY_A 3
+#define DFU_SERIAL_LEGACY_B 4
 
 /* Module-global libusb context */
 static libusb_context *g_ctx = NULL;
@@ -52,7 +55,7 @@ void usb_dfu_cleanup(void)
     }
 }
 
-int usb_dfu_find(libusb_device_handle **handle)
+int usb_dfu_find(libusb_device_handle **handle, uint8_t *iserial_out)
 {
     libusb_device **devs = NULL;
     ssize_t count;
@@ -62,6 +65,8 @@ int usb_dfu_find(libusb_device_handle **handle)
     if (!handle)
         return -1;
     *handle = NULL;
+    if (iserial_out)
+        *iserial_out = 0;
 
     if (!g_ctx) {
         log_error("usb_dfu_find: libusb not initialized (call usb_dfu_init first)");
@@ -89,9 +94,12 @@ int usb_dfu_find(libusb_device_handle **handle)
                 *handle = NULL;
                 continue;
             }
-            log_info("DFU device found (bus %d, addr %d)",
+            if (iserial_out)
+                *iserial_out = desc.iSerialNumber;
+            log_info("DFU device found (bus %d, addr %d, iSerial=%u)",
                      libusb_get_bus_number(devs[i]),
-                     libusb_get_device_address(devs[i]));
+                     libusb_get_device_address(devs[i]),
+                     (unsigned)desc.iSerialNumber);
             found = 1;
             break;
         }
@@ -134,12 +142,54 @@ static int parse_hex_field(const char *serial, const char *key, uint64_t *out)
     return 0;
 }
 
-int usb_dfu_read_info(libusb_device_handle *handle, uint32_t *cpid,
-                      uint64_t *ecid, char *serial, size_t serial_len)
+/*
+ * try_read_serial_descriptor -- Read one string descriptor at `index`
+ * into buf (NUL-terminated on success).  Retries transient PIPE/TIMEOUT
+ * errors up to twice.  Returns the number of ASCII bytes read (>=0) on
+ * success, or the libusb error on hard failure.  A returned length of
+ * zero is treated as a hard failure -- the descriptor exists but is
+ * empty, which no Apple DFU firmware produces for CPID/ECID.
+ */
+static int try_read_serial_descriptor(libusb_device_handle *handle,
+                                      uint8_t index,
+                                      unsigned char *buf, size_t buf_len)
+{
+    int ret = LIBUSB_ERROR_INVALID_PARAM;
+    int attempt;
+
+    if (index == 0)
+        return LIBUSB_ERROR_INVALID_PARAM;
+
+    for (attempt = 0; attempt < 3; attempt++) {
+        ret = libusb_get_string_descriptor_ascii(handle, index,
+                                                 buf, (int)buf_len);
+        if (ret >= 0)
+            break;
+        if (ret != LIBUSB_ERROR_PIPE && ret != LIBUSB_ERROR_TIMEOUT)
+            break;
+        if (attempt < 2) {
+            log_warn("serial descriptor read at idx %u: %s (attempt %d/3, retrying)",
+                     (unsigned)index, libusb_strerror(ret), attempt + 1);
+            usleep(50000);
+        }
+    }
+    return ret;
+}
+
+int usb_dfu_read_info(libusb_device_handle *handle, uint8_t iserial_hint,
+                      uint32_t *cpid, uint64_t *ecid,
+                      char *serial, size_t serial_len)
 {
     unsigned char buf[DFU_SERIAL_MAX];
-    int ret;
+    unsigned char sentinel_buf[DFU_SERIAL_MAX];
+    int sentinel_len = 0;
+    int all_product_string = 1;
+    int any_success = 0;
+    int chosen_len = 0;
     uint64_t val;
+    uint8_t probe_order[3];
+    size_t probe_count = 0;
+    size_t i, j;
 
     if (!handle)
         return -1;
@@ -148,42 +198,107 @@ int usb_dfu_read_info(libusb_device_handle *handle, uint32_t *cpid,
     if (cpid) *cpid = 0;
     if (ecid) *ecid = 0;
     if (serial && serial_len > 0) serial[0] = '\0';
+    buf[0] = '\0';
+    sentinel_buf[0] = '\0';
 
-    /* Read the serial string descriptor (index 3 for Apple DFU).
-     * Retry on transient PIPE/TIMEOUT errors -- common on A12+ DFU. */
-    {
-        int attempt;
-        for (attempt = 0; attempt < 3; attempt++) {
-            ret = libusb_get_string_descriptor_ascii(handle, DFU_SERIAL_INDEX,
-                                                     buf, sizeof(buf));
-            if (ret >= 0)
-                break;
-            if (ret != LIBUSB_ERROR_PIPE && ret != LIBUSB_ERROR_TIMEOUT)
-                break;
-            if (attempt < 2) {
-                log_warn("serial descriptor read: %s (attempt %d/3, retrying)",
-                         libusb_strerror(ret), attempt + 1);
-                usleep(50000);
-            }
+    /*
+     * Build a deduplicated probe order.  Hint first (typically the
+     * device's own bDeviceDescriptor.iSerialNumber), then the two
+     * legacy indices that cover every shipped Apple iBoot layout.
+     */
+    if (iserial_hint != 0)
+        probe_order[probe_count++] = iserial_hint;
+    if (DFU_SERIAL_LEGACY_A != iserial_hint)
+        probe_order[probe_count++] = DFU_SERIAL_LEGACY_A;
+    if (DFU_SERIAL_LEGACY_B != iserial_hint &&
+        DFU_SERIAL_LEGACY_B != DFU_SERIAL_LEGACY_A)
+        probe_order[probe_count++] = DFU_SERIAL_LEGACY_B;
+
+    for (i = 0; i < probe_count; i++) {
+        uint8_t idx = probe_order[i];
+        int ret;
+
+        /* Skip if we already tried this index (defensive; the dedupe
+         * above should have caught it). */
+        int already = 0;
+        for (j = 0; j < i; j++) {
+            if (probe_order[j] == idx) { already = 1; break; }
         }
+        if (already)
+            continue;
+
+        ret = try_read_serial_descriptor(handle, idx, buf, sizeof(buf));
+        if (ret <= 0) {
+            log_debug("serial descriptor idx %u: %s",
+                      (unsigned)idx,
+                      ret == 0 ? "empty" : libusb_strerror(ret));
+            continue;
+        }
+
+        if (ret >= (int)sizeof(buf))
+            ret = (int)sizeof(buf) - 1;
+        buf[ret] = '\0';
+        any_success = 1;
+        log_debug("DFU serial string (idx %u): %s", (unsigned)idx, (char *)buf);
+
+        /*
+         * When the read returns the human-readable product string, the
+         * device exposed CPID/ECID at a different descriptor.  Record
+         * the last one we saw so the sentinel diagnostic can still
+         * report what the user is seeing, then keep probing.
+         */
+        if (strncmp((char *)buf, "Apple Mobile Device", 19) == 0) {
+            memcpy(sentinel_buf, buf, (size_t)ret + 1);
+            sentinel_len = ret;
+            continue;
+        }
+
+        /* Non-product string: this is the descriptor we want. */
+        all_product_string = 0;
+        chosen_len = ret;
+        log_info("DFU serial descriptor resolved at index %u", (unsigned)idx);
+        break;
     }
-    if (ret < 0) {
-        log_error("failed to read serial descriptor: %s",
-                  libusb_strerror(ret));
-        usb_print_error(ret);
+
+    if (!any_success) {
+        log_error("failed to read serial descriptor at any probed index");
         return -1;
     }
 
-    if (ret >= (int)sizeof(buf))
-        ret = (int)sizeof(buf) - 1;
-    buf[ret] = '\0';
-    log_debug("DFU serial string: %s", (char *)buf);
+    if (all_product_string) {
+        /*
+         * Every probe returned the product string, so the caller must
+         * either provide --cpid/--ecid or re-enter true SecureROM DFU.
+         * Report through the same success path so caller-level override
+         * logic (main.c) can still fire.
+         */
+        if (sentinel_len > 0) {
+            if (sentinel_len >= (int)sizeof(sentinel_buf))
+                sentinel_len = (int)sizeof(sentinel_buf) - 1;
+            sentinel_buf[sentinel_len] = '\0';
+            if (serial && serial_len > 0) {
+                strncpy(serial, (char *)sentinel_buf, serial_len - 1);
+                serial[serial_len - 1] = '\0';
+            }
+        }
+        log_error("DFU serial descriptor at every probed index returned only the product string.");
+        log_info("This usually means the device exposes CPID/ECID at a different index");
+        log_info("than the tool probes (or is not in true SecureROM DFU).  Verify with");
+        log_info("`irecovery -q` and re-run with `--cpid 0xXXXX --ecid 0xYYYYYY`,");
+        log_info("or re-enter DFU with the correct button sequence:");
+        log_info("  Home button:  Power+Home 10s, release Power, hold Home 5s");
+        log_info("  Face ID:      Vol-Up, Vol-Down, hold Side to black screen,");
+        log_info("                Side+Vol-Down 5s, release Side, hold Vol-Down 10s");
+        log_info("Screen must stay completely BLACK (no Apple logo).");
+        return 0;
+    }
 
     /* Copy full serial string to caller */
     if (serial && serial_len > 0) {
         strncpy(serial, (char *)buf, serial_len - 1);
         serial[serial_len - 1] = '\0';
     }
+    (void)chosen_len;
 
     /* Parse CPID */
     if (cpid) {
@@ -203,19 +318,6 @@ int usb_dfu_read_info(libusb_device_handle *handle, uint32_t *cpid,
         } else {
             log_warn("ECID field not found in serial string");
         }
-    }
-
-    /* When CPID is still zero after parsing, the serial is likely the
-     * uninitialised iBoot string -- device is not in true SecureROM DFU mode. */
-    if (cpid && *cpid == 0 &&
-        strncmp((char *)buf, "Apple Mobile Device", 19) == 0) {
-        log_error("DFU serial indicates device is NOT in SecureROM DFU mode.");
-        log_info("Expected format: 'CPID:XXXX CPRV:XX BDID:XX ECID:XXXX ...'");
-        log_info("Re-enter DFU using the correct button sequence:");
-        log_info("  Home button:  Power+Home 10s, release Power, hold Home 5s");
-        log_info("  Face ID:      Vol-Up, Vol-Down, hold Side to black screen,");
-        log_info("                Side+Vol-Down 5s, release Side, hold Vol-Down 10s");
-        log_info("Screen must stay completely BLACK (no Apple logo).");
     }
 
     return 0;

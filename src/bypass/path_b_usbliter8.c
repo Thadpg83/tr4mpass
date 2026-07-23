@@ -5,7 +5,27 @@ const bypass_module_t path_b_usbliter8_module = {
     .probe       = path_b_usbliter8_probe,
     .execute     = path_b_usbliter8_execute
 };
+static int path_b_usbliter8_probe(device_info_t *dev)
+{
+    if (!dev || !dev->usb) {
+        return 0;
+    }
 
+    /* Only for A12 (T8020) and A13 (T8030) */
+    if (dev->cpid != 0x8020 && dev->cpid != 0x8030) {
+        log_debug("[path_b_usbliter8] CPID 0x%04X not A12/A13, skipping", dev->cpid);
+        return 0;
+    }
+
+    /* Must be in DFU mode */
+    if (dev->is_dfu_mode != 1) {
+        log_debug("[path_b_usbliter8] Device not in DFU mode, skipping");
+        return 0;
+    }
+
+    log_info("[path_b_usbliter8] A12/A13 device in DFU mode detected -- usbliter8 compatible");
+    return 1;
+}
 static int path_b_usbliter8_execute(device_info_t *dev) {
     // 1. Deliver usbliter8 exploit
     usbliter8_ctx_t ctx;

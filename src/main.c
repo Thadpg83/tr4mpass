@@ -185,8 +185,8 @@ static void register_modules(void)
 {
     if (bypass_register(&path_a_module) < 0)
         log_warn("Failed to register Path A module");
-    if (bypass_register(&path_b_module) < 0)
-        log_warn("Failed to register Path B module");
+    if (bypass_register(&path_b_usbliter8_module) < 0)          // NEW
+        log_warn("Failed to register Path B usbliter8 module"); // NEW
     log_debug("Registered %d bypass module(s)", bypass_count());
 }
 

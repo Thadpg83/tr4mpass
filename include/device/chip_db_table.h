@@ -1,4 +1,17 @@
 #ifndef CHIP_DB_TABLE_H
+typedef struct {
+    uint32_t cpid;
+    const char *name;
+    const char *marketing;
+    int checkm8_vulnerable;
+    int usbliter8_vulnerable;  // NEW
+    // ... other fields
+} chip_info_t;
+
+// A12 (T8020)
+{ 0x8020, "A12", "A12", 0, 1, ... },
+// A13 (T8030)
+{ 0x8030, "A13", "A13", 0, 1, ... },
 #define CHIP_DB_TABLE_H
 
 /*
